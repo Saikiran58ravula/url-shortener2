@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>URL Shortener</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-dark bg-dark mb-4">
+  <div class="container">
+    <span class="navbar-brand fw-bold">URL Shortener</span>
+    <button id="logoutBtn" class="btn btn-outline-light btn-sm d-none" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="container pb-5">
+  <div id="alertBox"></div>
+
+  <!-- AUTH -->
+  <div id="authView" class="row justify-content-center">
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card shadow-sm"><div class="card-body">
+        <ul class="nav nav-pills nav-fill mb-3">
+          <li class="nav-item"><button class="nav-link active" id="tabLogin" onclick="setTab('login')">Login</button></li>
+          <li class="nav-item"><button class="nav-link" id="tabReg" onclick="setTab('register')">Register</button></li>
+        </ul>
+        <input id="aUser" class="form-control mb-2" placeholder="Username">
+        <input id="aEmail" class="form-control mb-2 d-none" placeholder="Email" type="email">
+        <input id="aPass" class="form-control mb-3" placeholder="Password (min 8 chars)" type="password">
+        <button id="authBtn" class="btn btn-primary w-100" onclick="submitAuth()">Login</button>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- APP -->
+  <div id="appView" class="d-none">
+    <div class="card shadow-sm mb-4"><div class="card-body">
+      <h5 class="card-title">Create a short link</h5>
+      <div class="row g-2">
+        <div class="col-12 col-lg-5"><input id="cUrl" class="form-control" placeholder="https://your-long-url.com/..."></div>
+        <div class="col-6 col-lg-2"><input id="cAlias" class="form-control" placeholder="Custom alias (optional)"></div>
+        <div class="col-6 col-lg-3"><input id="cExp" type="datetime-local" class="form-control" title="Expiry (optional)"></div>
+        <div class="col-12 col-lg-2"><button class="btn btn-primary w-100" onclick="createUrl()">Shorten</button></div>
+      </div>
+    </div></div>
+
+    <div class="card shadow-sm"><div class="card-body">
+      <h5 class="card-title">Your links</h5>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead><tr><th>Short URL</th><th>Original</th><th>Status</th><th>Expires</th><th>Clicks</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="d-flex justify-content-between align-items-center">
+        <button class="btn btn-outline-secondary btn-sm" id="prevBtn" onclick="go(-1)">Previous</button>
+        <span id="pageInfo" class="text-muted small"></span>
+        <button class="btn btn-outline-secondary btn-sm" id="nextBtn" onclick="go(1)">Next</button>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="modal fade" id="editModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">Edit link</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input type="hidden" id="eId">
+    <label class="form-label">Custom alias</label>
+    <input id="eAlias" class="form-control mb-2">
+    <label class="form-label">Expiry</label>
+    <input id="eExp" type="datetime-local" class="form-control mb-2">
+    <label class="form-label">Status</label>
+    <select id="eStatus" class="form-select">
+      <option value="active">Active</option><option value="disabled">Disabled</option>
+    </select>
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary" onclick="saveEdit()">Save</button></div>
+</div></div></div>
+
+<!-- ANALYTICS MODAL -->
+<div class="modal fade" id="anModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="anTitle">Analytics</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="row text-center mb-3">
+      <div class="col"><div class="fs-3 fw-bold" id="anTotal">0</div><div class="text-muted small">Total clicks</div></div>
+      <div class="col"><div class="fs-3 fw-bold" id="anUnique">0</div><div class="text-muted small">Unique visitors</div></div>
+    </div>
+    <div class="btn-group btn-group-sm mb-2">
+      <button class="btn btn-outline-primary active" onclick="setView('day', this)">Daily</button>
+      <button class="btn btn-outline-primary" onclick="setView('week', this)">Weekly</button>
+      <button class="btn btn-outline-primary" onclick="setView('month', this)">Monthly</button>
+    </div>
+    <canvas id="anChart" height="120"></canvas>
+    <div class="row mt-3">
+      <div class="col-12 col-md-4"><h6>Referrers</h6><ul class="list-group list-group-flush small" id="anRef"></ul></div>
+      <div class="col-12 col-md-4"><h6>Devices</h6><ul class="list-group list-group-flush small" id="anDev"></ul></div>
+      <div class="col-12 col-md-4"><h6>Browsers</h6><ul class="list-group list-group-flush small" id="anBro"></ul></div>
+    </div>
+  </div>
+</div></div></div>
+
+<script>
+let token = localStorage.getItem("token");
+let mode = "login", page = 1, hasNext = false, hasPrev = false;
+let chart = null, daily = [], view = "day";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function msg(e) {
+  if (typeof e === "string") return e;
+  if (e && e.detail) return e.detail;
+  return Object.entries(e || {}).map(([k, v]) => k + ": " + (Array.isArray(v) ? v.join(" ") : v)).join(" | ") || "Something went wrong";
+}
+function alertMsg(text, type = "danger") {
+  $("alertBox").innerHTML = '<div class="alert alert-' + type + ' alert-dismissible">' + esc(text) +
+    '<button class="btn-close" data-bs-dismiss="alert"></button></div>';
+}
+
+async function api(path, opts = {}, auth = true) {
+  const headers = { "Content-Type": "application/json" };
+  if (auth && token) headers.Authorization = "Bearer " + token;
+  const res = await fetch("/api" + path, { ...opts, headers });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (res.status === 401 && auth && token) { logout(); }
+  if (!res.ok) throw data || { detail: "Error " + res.status };
+  return data;
+}
+
+function setTab(m) {
+  mode = m;
+  $("tabLogin").classList.toggle("active", m === "login");
+  $("tabReg").classList.toggle("active", m === "register");
+  $("aEmail").classList.toggle("d-none", m === "login");
+  $("authBtn").textContent = m === "login" ? "Login" : "Create account";
+}
+
+async function submitAuth() {
+  const username = $("aUser").value.trim(), password = $("aPass").value;
+  try {
+    if (mode === "register") {
+      await api("/auth/register/", { method: "POST", body: JSON.stringify({ username, password, email: $("aEmail").value.trim() }) }, false);
+      alertMsg("Account created. You can log in now.", "success");
+      setTab("login");
+      return;
+    }
+    const d = await api("/auth/login/", { method: "POST", body: JSON.stringify({ username, password }) }, false);
+    token = d.access;
+    localStorage.setItem("token", token);
+    $("alertBox").innerHTML = "";
+    showApp();
+  } catch (e) { alertMsg(msg(e)); }
+}
+
+function logout() {
+  token = null;
+  localStorage.removeItem("token");
+  $("appView").classList.add("d-none");
+  $("logoutBtn").classList.add("d-none");
+  $("authView").classList.remove("d-none");
+}
+
+function showApp() {
+  $("authView").classList.add("d-none");
+  $("appView").classList.remove("d-none");
+  $("logoutBtn").classList.remove("d-none");
+  loadUrls();
+}
+
+async function createUrl() {
+  const body = { original_url: $("cUrl").value.trim() };
+  if ($("cAlias").value.trim()) body.custom_alias = $("cAlias").value.trim();
+  if ($("cExp").value) body.expires_at = new Date($("cExp").value).toISOString();
+  try {
+    await api("/urls/", { method: "POST", body: JSON.stringify(body) });
+    $("cUrl").value = ""; $("cAlias").value = ""; $("cExp").value = "";
+    alertMsg("Short link created.", "success");
+    page = 1; loadUrls();
+  } catch (e) { alertMsg(msg(e)); }
+}
+
+async function loadUrls() {
+  try {
+    const d = await api("/urls/?page=" + page);
+    hasNext = !!d.next; hasPrev = !!d.previous;
+    $("prevBtn").disabled = !hasPrev; $("nextBtn").disabled = !hasNext;
+    $("pageInfo").textContent = "Page " + page + " · " + d.count + " links";
+    $("rows").innerHTML = d.results.map((u) => {
+      const orig = u.original_url.length > 45 ? u.original_url.slice(0, 45) + "…" : u.original_url;
+      const badge = { active: "success", disabled: "secondary", expired: "warning", reported: "danger" }[u.status] || "secondary";
+      return "<tr><td><a href='" + esc(u.short_url) + "' target='_blank' rel='noopener'>" + esc(u.short_url) + "</a></td>" +
+        "<td title='" + esc(u.original_url) + "'>" + esc(orig) + "</td>" +
+        "<td><span class='badge text-bg-" + badge + "'>" + esc(u.status) + "</span></td>" +
+        "<td>" + (u.expires_at ? new Date(u.expires_at).toLocaleString() : "Never") + "</td>" +
+        "<td>" + u.click_count + "</td>" +
+        "<td class='text-nowrap'>" +
+        "<button class='btn btn-sm btn-outline-secondary me-1' onclick=\"copyLink('" + esc(u.short_url) + "')\">Copy</button>" +
+        "<button class='btn btn-sm btn-outline-primary me-1' onclick='openAnalytics(" + u.id + ")'>Stats</button>" +
+        "<button class='btn btn-sm btn-outline-dark me-1' onclick='openEdit(" + u.id + ")'>Edit</button>" +
+        "<button class='btn btn-sm btn-outline-danger' onclick='del(" + u.id + ")'>Delete</button></td></tr>";
+    }).join("") || "<tr><td colspan='6' class='text-center text-muted'>No links yet</td></tr>";
+  } catch (e) {
+    if (page > 1) { page--; loadUrls(); } else alertMsg(msg(e));
+  }
+}
+function go(n) { if ((n > 0 && hasNext) || (n < 0 && hasPrev)) { page += n; loadUrls(); } }
+
+function copyLink(url) {
+  navigator.clipboard.writeText(url).then(() => alertMsg("Copied to clipboard", "success"));
+}
+
+async function del(id) {
+  if (!confirm("Delete this link?")) return;
+  try { await api("/urls/" + id + "/", { method: "DELETE" }); loadUrls(); } catch (e) { alertMsg(msg(e)); }
+}
+
+async function openEdit(id) {
+  const u = await api("/urls/" + id + "/");
+  $("eId").value = id;
+  $("eAlias").value = u.custom_alias || "";
+  $("eStatus").value = u.status === "disabled" ? "disabled" : "active";
+  if (u.expires_at) {
+    const d = new Date(u.expires_at);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    $("eExp").value = d.toISOString().slice(0, 16);
+  } else $("eExp").value = "";
+  new bootstrap.Modal($("editModal")).show();
+}
+
+async function saveEdit() {
+  const body = {
+    custom_alias: $("eAlias").value.trim() || null,
+    expires_at: $("eExp").value ? new Date($("eExp").value).toISOString() : null,
+    status: $("eStatus").value,
+  };
+  try {
+    await api("/urls/" + $("eId").value + "/", { method: "PATCH", body: JSON.stringify(body) });
+    bootstrap.Modal.getInstance($("editModal")).hide();
+    alertMsg("Link updated.", "success");
+    loadUrls();
+  } catch (e) { alertMsg(msg(e)); }
+}
+
+function listHtml(items, key) {
+  return items.map((i) => "<li class='list-group-item d-flex justify-content-between'><span>" +
+    esc(i[key] || "unknown") + "</span><b>" + i.n + "</b></li>").join("") ||
+    "<li class='list-group-item text-muted'>No data</li>";
+}
+
+async function openAnalytics(id) {
+  try {
+    const d = await api("/urls/" + id + "/analytics/");
+    daily = d.daily;
+    $("anTotal").textContent = d.total_clicks;
+    $("anUnique").textContent = d.unique_visitors;
+    $("anRef").innerHTML = listHtml(d.referrers, "referrer");
+    $("anDev").innerHTML = listHtml(d.devices, "device");
+    $("anBro").innerHTML = listHtml(d.browsers, "browser");
+    view = "day";
+    document.querySelectorAll("#anModal .btn-group .btn").forEach((b, i) => b.classList.toggle("active", i === 0));
+    new bootstrap.Modal($("anModal")).show();
+    setTimeout(drawChart, 300);
+  } catch (e) { alertMsg(msg(e)); }
+}
+
+function setView(v, btn) {
+  view = v;
+  btn.parentElement.querySelectorAll(".btn").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  drawChart();
+}
+
+function bucket(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  if (view === "month") return dateStr.slice(0, 7);
+  if (view === "week") {
+    const diff = (d.getDay() + 6) % 7;  // Monday as start of week
+    d.setDate(d.getDate() - diff);
+    return d.toISOString().slice(0, 10);
+  }
+  return dateStr;
+}
+
+function drawChart() {
+  const groups = {};
+  daily.forEach((r) => { const k = bucket(r.date); groups[k] = (groups[k] || 0) + r.clicks; });
+  const labels = Object.keys(groups).sort();
+  if (chart) chart.destroy();
+  chart = new Chart($("anChart"), {
+    type: "line",
+    data: { labels, datasets: [{ label: "Clicks", data: labels.map((l) => groups[l]), borderColor: "#0d6efd", tension: 0.3, fill: false }] },
+    options: { scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+}
+
+if (token) showApp();
+</script>
+</body>
+</html>
